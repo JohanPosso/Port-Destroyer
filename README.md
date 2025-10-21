@@ -64,14 +64,18 @@ chmod +x start_tray.sh port_destroyer.py
 ### Dependencias del sistema (solo Ubuntu/Debian)
 
 ```bash
-# Si estás en Ubuntu, instala Cairo primero:
-sudo apt install libcairo2-dev pkg-config python3-dev
+# Opción 1: Usar script automático (RECOMENDADO)
+chmod +x UBUNTU_FIX.sh
+./UBUNTU_FIX.sh
 
-# Para bandeja del sistema en GNOME:
-sudo apt install gnome-shell-extension-appindicator
+# Opción 2: Manual
+sudo apt install libcairo2-dev pkg-config python3-dev gir1.2-appindicator3-0.1 python3-gi
+python3 -m venv --system-site-packages venv  # Importante: --system-site-packages
+source venv/bin/activate
+pip install Pillow cairosvg
 ```
 
-Listo! El mismo proyecto funciona en ambos sistemas.
+**Nota Ubuntu:** Usa `port_destroyer_tray_linux.py` en lugar de `port_destroyer_tray.py` para mejor compatibilidad con GNOME.
 
 ## Uso
 
