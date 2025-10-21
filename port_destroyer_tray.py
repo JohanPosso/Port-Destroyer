@@ -359,12 +359,18 @@ class PortDestroyerTray:
             except Exception as e:
                 print(f"[DEBUG] Configuración de macOS: {e}")
         
+        # Cargar procesos iniciales antes de crear el icono
+        print("[INFO] Cargando procesos iniciales...")
+        self.processes = self.destroyer.get_processes_on_ports()
+        self.processes_dict = {(p['port'], p['pid']): p for p in self.processes}
+        print(f"[INFO] {len(self.processes)} proceso(s) encontrado(s)")
+        
         # Crear ícono
-        image = self.create_icon_image(False)
+        image = self.create_icon_image(len(self.processes) > 0)
         self.icon = pystray.Icon(
             "PortDestroyer",
             image,
-            "PortDestroyer",
+            f"PortDestroyer - {len(self.processes)} proceso(s)",
             menu=pystray.Menu(self.create_menu)
         )
         
@@ -373,7 +379,11 @@ class PortDestroyerTray:
         update_thread.start()
         
         # Configurar y ejecutar
-        self.icon.run(setup=self.setup)
+        try:
+            self.icon.run(setup=self.setup)
+        except Exception as e:
+            if "SystemExit" not in str(type(e).__name__):
+                raise
 
 
 def main():
@@ -407,8 +417,11 @@ def main():
         print("\n[INFO] Cerrando PortDestroyer...")
         app.stop_event.set()
         if app.icon:
-            app.icon.stop()
-        sys.exit(0)
+            try:
+                app.icon.stop()
+            except:
+                pass  # Ignorar errores de Xlib al cerrar
+        # No llamar sys.exit() aquí para evitar error de Xlib
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -418,7 +431,9 @@ def main():
     except KeyboardInterrupt:
         print("\n[INFO] Cerrando PortDestroyer...")
         app.stop_event.set()
-        sys.exit(0)
+    except SystemExit:
+        # Salida normal, no mostrar error
+        pass
     except Exception as e:
         print(f"\n[ERROR] Error fatal: {e}")
         import traceback
