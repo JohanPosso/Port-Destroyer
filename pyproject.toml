@@ -1,0 +1,83 @@
+# PortDestroyer Configuration
+# Author: Jesus Posso
+
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "port-destroyer"
+version = "1.0.0"
+description = "Professional port management tool for macOS and Linux"
+readme = "README.md"
+requires-python = ">=3.7"
+license = {text = "MIT"}
+keywords = ["port", "management", "system-tray", "macos", "linux", "development-tools"]
+authors = [
+    {name = "Jesus Posso", email = "contact@jesusposso.dev"}
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Systems Administration",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "pystray>=0.19.5",
+    "Pillow>=10.0.0",
+    "cairosvg>=2.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "flake8>=6.0",
+    "mypy>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/JohanPosso/port-destroyer"
+Documentation = "https://github.com/JohanPosso/port-destroyer#readme"
+Repository = "https://github.com/JohanPosso/port-destroyer"
+"Bug Tracker" = "https://github.com/JohanPosso/port-destroyer/issues"
+Changelog = "https://github.com/JohanPosso/port-destroyer/blob/main/CHANGELOG.md"
+
+[project.scripts]
+port-destroyer = "port_destroyer:main"
+port-destroyer-tray = "port_destroyer_tray:main"
+
+[tool.black]
+line-length = 100
+target-version = ['py37', 'py38', 'py39', 'py310', 'py311', 'py312', 'py313']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.7"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+
