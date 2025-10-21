@@ -35,19 +35,37 @@ if platform.system() == "Darwin":
     except ImportError:
         pass
 
-# Intentar importar pystray (multiplataforma)
-try:
-    import pystray
-    from pystray import MenuItem as item
-    from PIL import Image, ImageDraw, ImageFont, ImageEnhance
-    import cairosvg
-    HAS_PYSTRAY = True
-    HAS_CAIROSVG = True
-except ImportError as e:
-    HAS_PYSTRAY = False
-    HAS_CAIROSVG = False
-    print(f"[ADVERTENCIA] Dependencias no instaladas: {e}")
-    print("Instálalo con: pip3 install pystray pillow cairosvg")
+# Detectar plataforma para usar backend apropiado
+USE_APPINDICATOR = platform.system() == "Linux"
+
+if USE_APPINDICATOR:
+    # En Linux, intentar usar AppIndicator3 (más confiable en Ubuntu/GNOME)
+    try:
+        import gi
+        gi.require_version('Gtk', '3.0')
+        gi.require_version('AppIndicator3', '0.1')
+        from gi.repository import Gtk, AppIndicator3, GLib
+        from PIL import Image, ImageDraw, ImageFont
+        import cairosvg
+        HAS_DEPS = True
+        print("[INFO] Usando AppIndicator3 (backend nativo para Ubuntu)")
+    except (ImportError, ValueError) as e:
+        HAS_DEPS = False
+        print(f"[ERROR] AppIndicator3 no disponible: {e}")
+        print("Instala con: sudo apt install gir1.2-appindicator3-0.1 python3-gi")
+else:
+    # En macOS, usar pystray
+    try:
+        import pystray
+        from pystray import MenuItem as item
+        from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+        import cairosvg
+        HAS_DEPS = True
+        print("[INFO] Usando pystray (backend para macOS)")
+    except ImportError as e:
+        HAS_DEPS = False
+        print(f"[ADVERTENCIA] Dependencias no instaladas: {e}")
+        print("Instálalo con: pip3 install pystray pillow cairosvg")
 
 
 class PortDestroyerTray:
