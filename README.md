@@ -42,87 +42,71 @@ A fast, efficient, and user-friendly system tray application to monitor and mana
 
 ## Instalación
 
-**Mismo proceso para macOS y Ubuntu/Linux:**
+**UN SOLO COMANDO para macOS y Ubuntu:**
 
 ```bash
-# 1. Clonar o descargar el proyecto
-cd port-destroy
+# 1. Clonar el proyecto
+git clone https://github.com/JohanPosso/Port-Destroyer.git
+cd Port-Destroyer
 
-# 2. Crear entorno virtual
-python3 -m venv venv
+# 2. Instalar (detecta automáticamente el OS)
+chmod +x port-destroyer
+./port-destroyer --install
 
-# 3. Activar entorno virtual
-source venv/bin/activate
-
-# 4. Instalar dependencias
-pip install -r requirements.txt
-
-# 5. Dar permisos
-chmod +x start_tray.sh port_destroyer.py
+# 3. Listo! Ya puedes ejecutar
+./port-destroyer
 ```
 
-### Dependencias del sistema (solo Ubuntu/Debian)
+### Inicio Automático (Opcional)
 
 ```bash
-# Opción 1: Usar script automático (RECOMENDADO)
-chmod +x UBUNTU_FIX.sh
-./UBUNTU_FIX.sh
+# Configurar para que inicie al arrancar el sistema
+./port-destroyer --autostart
 
-# Opción 2: Manual
-sudo apt install libcairo2-dev pkg-config python3-dev gir1.2-appindicator3-0.1 python3-gi
-python3 -m venv --system-site-packages venv  # Importante: --system-site-packages
-source venv/bin/activate
-pip install Pillow cairosvg
+# Desactivar inicio automático
+./port-destroyer --uninstall-autostart
 ```
-
-**Nota Ubuntu:** Usa `port_destroyer_tray_linux.py` en lugar de `port_destroyer_tray.py` para mejor compatibilidad con GNOME.
 
 ## Uso
 
-### Interfaz Gráfica (Barra Superior)
-
-La forma más cómoda de usar PortDestroyer:
+### Interfaz Gráfica (Recomendado)
 
 ```bash
-# Usando el script de inicio (activa automáticamente el entorno virtual)
-./start_tray.sh
+# Ejecutar (activa venv automáticamente, detecta el OS)
+./port-destroyer
 
-# O manualmente activando el entorno virtual:
-source venv/bin/activate
-python3 port_destroyer_tray.py
+# Con rango personalizado de puertos
+./port-destroyer --start 5000 --end 8000
 
-# Con rango personalizado
-./start_tray.sh  # Edita el script para personalizar el rango
+# Ver ayuda
+./port-destroyer --help
 ```
 
 **Características del icono:**
-- **Verde** - No hay procesos activos en el rango
+- **Verde** - No hay procesos activos
 - **Rojo** - Hay procesos activos
-- **Icono de red profesional** - Diseño SVG escalable que representa puertos/conexiones
-- **Actualización en tiempo real** - Responde inmediatamente a cambios
-- **Menú siempre visible** - Aparece por encima de todas las ventanas en macOS
-- Haz clic en el icono para ver el menú
+- **Icono profesional** - Diseño SVG escalable
+- **Actualización en tiempo real** - Cada 1.5 segundos
+- Click en el icono para ver el menú
 - Selecciona un proceso para eliminarlo
-- Usa "Eliminar Todos" para liberar todos los puertos
+- "Eliminar Todos" para liberar todos los puertos
 
-**Nota para macOS:** La aplicación está optimizada para que el menú siempre aparezca al frente de todas las ventanas.
+**Se ejecuta en segundo plano** - No necesitas mantener la terminal abierta.
 
-### Línea de Comandos (CLI)
-
-Para uso rápido desde la terminal:
+### CLI (Línea de Comandos)
 
 ```bash
-# Listar procesos en el rango por defecto (3000-9000)
-port-destroyer --list
+# Activar venv primero
+source venv/bin/activate
 
-# Listar con rango personalizado
-port-destroyer --list --start 5000 --end 8000
+# Listar procesos
+python3 port_destroyer.py --list
 
-# Matar proceso en puerto específico
-port-destroyer --kill 3000
+# Eliminar proceso en puerto específico
+python3 port_destroyer.py --kill 3000
 
-# Matar todos los procesos en el rango
-port-destroyer --kill-all
+# Eliminar todos
+python3 port_destroyer.py --kill-all
 ```
 
 ### Ejemplos Prácticos
@@ -228,30 +212,30 @@ X-GNOME-Autostart-enabled=true
 ### Estructura del Proyecto
 
 ```
-port-destroy/
-├── assets/
-│   └── icon.svg              # Icono SVG profesional
-├── port_destroyer.py         # Lógica principal y CLI
-├── port_destroyer_tray.py    # Interfaz de barra superior
-├── start_tray.sh             # Script de inicio
-├── requirements.txt          # Dependencias Python
+Port-Destroyer/
+├── assets/icon.svg           # Icono profesional SVG
+├── port_destroyer.py         # Motor + CLI (multiplataforma)
+├── port_destroyer_tray.py    # GUI (detecta macOS/Linux automáticamente)
+├── port-destroyer             # Script universal (hace todo)
+├── requirements.txt          # Dependencias
+├── LICENSE                   # MIT License
 └── README.md                 # Documentación
 ```
 
 ### Arquitectura
 
-- **port_destroyer.py**: Clase `PortDestroyer` con lógica multiplataforma
-  - Usa `lsof` en macOS
-  - Usa `ss` o `netstat` en Linux
-  - Métodos optimizados para listar y eliminar procesos
+**port_destroyer.py** - Motor principal
+- Detecta procesos con `lsof` (macOS) o `ss`/`netstat` (Linux)
+- Deduplicación automática
+- CLI completo
 
-- **port_destroyer_tray.py**: Clase `PortDestroyerTray` con interfaz gráfica
-  - Usa `pystray` para sistema de bandeja
-  - Renderizado SVG a PNG con `cairosvg`
-  - Thread para actualización automática en tiempo real
-  - Cache inteligente que solo actualiza cuando detecta cambios
-  - Menú dinámico con procesos actuales
-  - Tintado dinámico del icono según estado (verde/rojo)
+**port_destroyer_tray.py** - GUI unificada
+- Detecta automáticamente el OS
+- macOS: Usa `pystray` con optimizaciones AppKit
+- Linux: Usa `AppIndicator3` (nativo GNOME)
+- Actualización en tiempo real (1.5s)
+- Cache inteligente
+- Iconos dinámicos (verde/rojo)
 
 ## Solución de Problemas
 

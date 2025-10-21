@@ -1,0 +1,131 @@
+#!/bin/bash
+################################################################################
+# Port-Destroyer - Universal Script
+# Author: Jesus Posso
+# Version: 1.0.0
+#
+# Un solo script que hace TODO:
+# - Instala dependencias automáticamente
+# - Activa venv automáticamente  
+# - Detecta el OS y ejecuta correctamente
+# - Configura autostart
+################################################################################
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Función para instalar dependencias
+install_deps() {
+    echo "[INFO] Instalando dependencias..."
+    
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # Ubuntu/Linux
+        sudo apt update
+        sudo apt install -y gir1.2-appindicator3-0.1 python3-gi libcairo2-dev pkg-config python3-dev
+        
+        # Crear venv con acceso a paquetes del sistema (importante para python3-gi)
+        rm -rf venv
+        python3 -m venv --system-site-packages venv
+        source venv/bin/activate
+        pip install Pillow cairosvg
+    else
+        # macOS
+        python3 -m venv venv
+        source venv/bin/activate
+        pip install -r requirements.txt
+    fi
+    
+    echo "[OK] Dependencias instaladas correctamente"
+}
+
+# Función para configurar autostart
+setup_autostart() {
+    echo "[INFO] Configurando inicio automático..."
+    
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        mkdir -p ~/.config/autostart
+        cat > ~/.config/autostart/port-destroyer.desktop << EOF
+[Desktop Entry]
+Type=Application
+Name=Port Destroyer
+Exec=$SCRIPT_DIR/port-destroyer
+Icon=$SCRIPT_DIR/assets/icon.svg
+Terminal=false
+X-GNOME-Autostart-enabled=true
+Categories=System;Monitor;
+StartupNotify=false
+EOF
+        chmod +x ~/.config/autostart/port-destroyer.desktop
+        echo "[OK] Autostart configurado (Ubuntu)"
+        echo "    Se iniciará automáticamente al arrancar el sistema"
+    else
+        # macOS
+        mkdir -p ~/Library/LaunchAgents
+        cat > ~/Library/LaunchAgents/com.port-destroyer.plist << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.port-destroyer</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$SCRIPT_DIR/port-destroyer</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+</dict>
+</plist>
+EOF
+        launchctl load ~/Library/LaunchAgents/com.port-destroyer.plist 2>/dev/null
+        echo "[OK] Autostart configurado (macOS)"
+        echo "    Se iniciará automáticamente al arrancar el sistema"
+    fi
+}
+
+# Procesar argumentos
+case "$1" in
+    --install)
+        install_deps
+        exit 0
+        ;;
+    --autostart)
+        setup_autostart
+        exit 0
+        ;;
+    --uninstall-autostart)
+        rm -f ~/.config/autostart/port-destroyer.desktop
+        launchctl unload ~/Library/LaunchAgents/com.port-destroyer.plist 2>/dev/null
+        rm -f ~/Library/LaunchAgents/com.port-destroyer.plist
+        echo "[OK] Autostart desactivado"
+        exit 0
+        ;;
+    --help)
+        echo "Port-Destroyer v1.0.0 by Jesus Posso"
+        echo ""
+        echo "Uso:"
+        echo "  ./port-destroyer                     Ejecutar aplicación"
+        echo "  ./port-destroyer --install           Instalar dependencias"
+        echo "  ./port-destroyer --autostart         Configurar inicio automático"
+        echo "  ./port-destroyer --uninstall-autostart"
+        echo "  ./port-destroyer --start 5000 --end 8000  # Rango personalizado"
+        echo ""
+        exit 0
+        ;;
+esac
+
+# Verificar venv
+if [ ! -d "venv" ]; then
+    echo "[ERROR] No se encontró venv"
+    echo "Ejecuta primero: ./port-destroyer --install"
+    exit 1
+fi
+
+# Activar venv automáticamente
+source venv/bin/activate
+
+# Ejecutar aplicación unificada (detecta el OS automáticamente)
+exec python3 port_destroyer_tray.py "$@"
+

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-PortDestroyer System Tray - Professional system tray interface
+PortDestroyer System Tray - Universal interface for macOS and Linux
 
 Author: Jesus Posso
 License: MIT
 Version: 1.0.0
-Repository: https://github.com/JohanPosso/port-destroyer
+Repository: https://github.com/JohanPosso/Port-Destroyer
 
 Description:
-    System tray application for PortDestroyer with real-time updates,
-    professional SVG icon, and optimized performance for macOS and Linux.
+    System tray application that automatically detects the OS and uses
+    the appropriate backend (pystray for macOS, AppIndicator3 for Linux).
 """
 
 __author__ = "Jesus Posso"
@@ -21,425 +21,428 @@ import platform
 import os
 from threading import Thread, Event
 import time
+import signal
 from io import BytesIO
 from port_destroyer import PortDestroyer
 
-# Configurar para que la aplicación siempre esté en primer plano en macOS
-if platform.system() == "Darwin":
-    try:
-        import AppKit
-        from Foundation import NSBundle
-        # Configurar la aplicación como agente de UI (aparece en la barra pero no en el dock)
-        info = NSBundle.mainBundle().infoDictionary()
-        info["LSUIElement"] = "1"
-    except ImportError:
-        pass
+# Detectar sistema operativo
+IS_LINUX = platform.system() == "Linux"
+IS_MACOS = platform.system() == "Darwin"
 
-# Detectar plataforma para usar backend apropiado
-USE_APPINDICATOR = platform.system() == "Linux"
-
-if USE_APPINDICATOR:
-    # En Linux, intentar usar AppIndicator3 (más confiable en Ubuntu/GNOME)
+# Importar dependencias según el OS
+if IS_LINUX:
+    # Ubuntu/Linux - Usar AppIndicator3
     try:
         import gi
         gi.require_version('Gtk', '3.0')
         gi.require_version('AppIndicator3', '0.1')
         from gi.repository import Gtk, AppIndicator3, GLib
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image
         import cairosvg
         HAS_DEPS = True
-        print("[INFO] Usando AppIndicator3 (backend nativo para Ubuntu)")
+        print("[INFO] Backend: AppIndicator3 (Linux)")
     except (ImportError, ValueError) as e:
         HAS_DEPS = False
-        print(f"[ERROR] AppIndicator3 no disponible: {e}")
-        print("Instala con: sudo apt install gir1.2-appindicator3-0.1 python3-gi")
-else:
-    # En macOS, usar pystray
+        print(f"[ERROR] {e}")
+        print("Instala: sudo apt install gir1.2-appindicator3-0.1 python3-gi")
+        sys.exit(1)
+        
+elif IS_MACOS:
+    # macOS - Usar pystray
     try:
         import pystray
         from pystray import MenuItem as item
-        from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+        from PIL import Image, ImageDraw, ImageFont
         import cairosvg
+        from Foundation import NSBundle
+        import AppKit
         HAS_DEPS = True
-        print("[INFO] Usando pystray (backend para macOS)")
+        print("[INFO] Backend: pystray (macOS)")
+        
+        # Configurar como agente de UI
+        try:
+            info = NSBundle.mainBundle().infoDictionary()
+            info["LSUIElement"] = "1"
+        except:
+            pass
     except ImportError as e:
         HAS_DEPS = False
-        print(f"[ADVERTENCIA] Dependencias no instaladas: {e}")
-        print("Instálalo con: pip3 install pystray pillow cairosvg")
+        print(f"[ERROR] {e}")
+        print("Instala: pip install pystray pillow cairosvg")
+        sys.exit(1)
+else:
+    print(f"[ERROR] Sistema operativo no soportado: {platform.system()}")
+    sys.exit(1)
 
 
 class PortDestroyerTray:
-    """Aplicación de bandeja del sistema para PortDestroyer"""
+    """Aplicación de bandeja del sistema (unificada para macOS y Linux)"""
     
     def __init__(self, start_port=3000, end_port=9000):
         self.destroyer = PortDestroyer(port_range=(start_port, end_port))
         self.start_port = start_port
         self.end_port = end_port
-        self.icon = None
         self.processes = []
-        self.processes_dict = {}  # Cache para comparación rápida
-        self.update_interval = 1.5  # Actualizar cada 1.5 segundos para mejor respuesta
+        self.processes_dict = {}
+        self.update_interval = 1.5
         self.stop_event = Event()
-        self.base_icon = None  # Cache del icono base
-        self._load_base_icon()
         
-    def _load_base_icon(self):
-        """Carga el icono SVG y lo convierte a PNG"""
+        if IS_LINUX:
+            self._init_linux()
+        else:
+            self._init_macos()
+    
+    def _init_linux(self):
+        """Inicialización específica para Linux"""
+        # Crear directorio temporal para iconos
+        self.temp_dir = "/tmp/port-destroyer"
+        os.makedirs(self.temp_dir, exist_ok=True)
+        self.icon_path_green = os.path.join(self.temp_dir, "icon_green.png")
+        self.icon_path_red = os.path.join(self.temp_dir, "icon_red.png")
+        
+        # Generar iconos PNG desde SVG
+        self._create_linux_icons()
+        
+        # Crear indicador AppIndicator3
+        self.indicator = AppIndicator3.Indicator.new(
+            "port-destroyer",
+            self.icon_path_green,
+            AppIndicator3.IndicatorCategory.APPLICATION_STATUS
+        )
+        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+        self.indicator.set_title("PortDestroyer")
+        
+        # Crear menú GTK
+        self.menu = Gtk.Menu()
+        self.indicator.set_menu(self.menu)
+    
+    def _init_macos(self):
+        """Inicialización específica para macOS"""
+        self.icon = None
+        self.base_icon = None
+        self._load_macos_icon()
+    
+    def _create_linux_icons(self):
+        """Crea iconos para Linux (verde y rojo)"""
         try:
-            # Obtener la ruta del directorio del script
             script_dir = os.path.dirname(os.path.abspath(__file__))
             svg_path = os.path.join(script_dir, 'assets', 'icon.svg')
             
-            if not os.path.exists(svg_path):
-                print(f"[ADVERTENCIA] No se encontró el icono en {svg_path}")
-                self.base_icon = None
-                return
-            
-            # En Linux, usar tamaño más pequeño para mejor calidad
-            icon_size = 64 if platform.system() == "Linux" else 128
-            
-            # Convertir SVG a PNG en memoria
-            png_data = cairosvg.svg2png(url=svg_path, output_width=icon_size, output_height=icon_size)
-            self.base_icon = Image.open(BytesIO(png_data))
-            
-            print(f"[INFO] Icono cargado correctamente ({icon_size}x{icon_size})")
-            
+            if os.path.exists(svg_path):
+                # Convertir SVG a PNG (64x64 para Linux)
+                png_green = cairosvg.svg2png(url=svg_path, output_width=64, output_height=64)
+                png_red = cairosvg.svg2png(url=svg_path, output_width=64, output_height=64)
+                
+                # Aplicar tintes
+                img_green = self._tint_image(Image.open(BytesIO(png_green)).convert('RGBA'), (40, 167, 69))
+                img_red = self._tint_image(Image.open(BytesIO(png_red)).convert('RGBA'), (220, 53, 69))
+                
+                img_green.save(self.icon_path_green, 'PNG')
+                img_red.save(self.icon_path_red, 'PNG')
+                print("[INFO] Iconos creados (64x64)")
+            else:
+                # Fallback: iconos simples
+                for color, path in [((40, 167, 69), self.icon_path_green), 
+                                   ((220, 53, 69), self.icon_path_red)]:
+                    img = Image.new('RGBA', (64, 64), color + (255,))
+                    img.save(path, 'PNG')
         except Exception as e:
-            print(f"[ERROR] No se pudo cargar el icono SVG: {e}")
+            print(f"[ERROR] Creando iconos: {e}")
+    
+    def _load_macos_icon(self):
+        """Carga icono para macOS"""
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            svg_path = os.path.join(script_dir, 'assets', 'icon.svg')
+            
+            if os.path.exists(svg_path):
+                png_data = cairosvg.svg2png(url=svg_path, output_width=128, output_height=128)
+                self.base_icon = Image.open(BytesIO(png_data))
+                print("[INFO] Icono cargado (128x128)")
+        except Exception as e:
+            print(f"[ERROR] Cargando icono: {e}")
             self.base_icon = None
     
-    def create_icon_image(self, has_processes=False):
-        """Crea un ícono profesional coloreado según el estado"""
-        if self.base_icon is None:
-            # Fallback a icono simple si no se puede cargar el SVG
-            return self._create_fallback_icon(has_processes)
-        
-        # Crear una copia del icono base
-        icon = self.base_icon.copy()
-        
-        # Aplicar tinte de color según el estado
-        if has_processes:
-            # Tinte rojo para procesos activos
-            icon = self._apply_color_tint(icon, (220, 53, 69))
-        else:
-            # Tinte verde para estado limpio
-            icon = self._apply_color_tint(icon, (40, 167, 69))
-        
-        return icon
-    
-    def _apply_color_tint(self, image, color):
-        """Aplica un tinte de color a la imagen"""
-        # Convertir a RGBA si no lo está
-        if image.mode != 'RGBA':
-            image = image.convert('RGBA')
-        
-        # Crear una capa de color
-        color_layer = Image.new('RGBA', image.size, color + (0,))
-        
-        # Obtener los datos de la imagen
-        img_data = image.copy()
-        
-        # Aplicar el tinte manteniendo el canal alfa
-        pixels = img_data.load()
-        color_pixels = color_layer.load()
-        
+    def _tint_image(self, image, color):
+        """Aplica tinte de color a la imagen"""
+        pixels = image.load()
         for y in range(image.size[1]):
             for x in range(image.size[0]):
                 r, g, b, a = pixels[x, y]
-                
-                # Si el pixel tiene transparencia completa, dejarlo así
-                if a == 0:
-                    continue
-                
-                # Mezclar el color con el tinte (50% mezcla)
-                new_r = int((r * 0.3) + (color[0] * 0.7))
-                new_g = int((g * 0.3) + (color[1] * 0.7))
-                new_b = int((b * 0.3) + (color[2] * 0.7))
-                
-                pixels[x, y] = (new_r, new_g, new_b, a)
-        
-        return img_data
-    
-    def _create_fallback_icon(self, has_processes=False):
-        """Crea un icono simple como fallback"""
-        width = 64
-        height = 64
-        image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-        dc = ImageDraw.Draw(image)
-        
-        # Colores según estado
-        if has_processes:
-            color = (220, 53, 69)  # Rojo
-        else:
-            color = (40, 167, 69)  # Verde
-        
-        # Círculo simple
-        padding = 8
-        dc.ellipse(
-            [padding, padding, width - padding, height - padding],
-            fill=color,
-            outline=(255, 255, 255),
-            width=3
-        )
-        
-        # Letra P
-        try:
-            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
-        except:
-            font = ImageFont.load_default()
-        
-        dc.text((18, 10), "P", fill=(255, 255, 255), font=font)
-        
+                if a > 0:
+                    new_r = int((r * 0.3) + (color[0] * 0.7))
+                    new_g = int((g * 0.3) + (color[1] * 0.7))
+                    new_b = int((b * 0.3) + (color[2] * 0.7))
+                    pixels[x, y] = (new_r, new_g, new_b, a)
         return image
     
-    def update_processes(self):
-        """Actualiza la lista de procesos en segundo plano con optimización"""
-        while not self.stop_event.is_set():
-            try:
-                new_processes = self.destroyer.get_processes_on_ports()
-                
-                # Crear diccionario para comparación rápida
-                new_dict = {(p['port'], p['pid']): p for p in new_processes}
-                
-                # Solo actualizar si hay cambios
-                if new_dict != self.processes_dict:
-                    self.processes = new_processes
-                    self.processes_dict = new_dict
-                    
-                    print(f"[DEBUG] Procesos actualizados: {len(self.processes)}")
-                    
-                    # Actualizar ícono y menú
-                    if self.icon:
-                        try:
-                            has_processes = len(self.processes) > 0
-                            self.icon.icon = self.create_icon_image(has_processes)
-                            count = len(self.processes)
-                            self.icon.title = f"PortDestroyer - {count} proceso{'s' if count != 1 else ''}"
-                            # Actualizar menú dinámicamente
-                            self.icon.menu = pystray.Menu(self.create_menu)
-                        except Exception as e:
-                            print(f"[ERROR] Actualizando UI: {e}")
-                    
-            except Exception as e:
-                print(f"[ERROR] Actualizando procesos: {e}")
-                import traceback
-                traceback.print_exc()
-            
-            # Esperar antes de la próxima actualización
-            self.stop_event.wait(self.update_interval)
+    def create_macos_icon(self, has_processes=False):
+        """Crea icono para macOS con tinte dinámico"""
+        if self.base_icon:
+            icon = self.base_icon.copy()
+            color = (220, 53, 69) if has_processes else (40, 167, 69)
+            return self._tint_image(icon, color)
+        
+        # Fallback: icono simple
+        width = 64
+        img = Image.new('RGBA', (width, width), (0, 0, 0, 0))
+        dc = ImageDraw.Draw(img)
+        color = (220, 53, 69) if has_processes else (40, 167, 69)
+        dc.ellipse([8, 8, 56, 56], fill=color, outline=(255, 255, 255), width=3)
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
+            dc.text((18, 10), "P", fill=(255, 255, 255), font=font)
+        except:
+            pass
+        return img
     
-    def on_list_processes(self, icon, item):
-        """Muestra la lista de procesos en consola"""
-        self._bring_to_front()
+    # ==================== LINUX (AppIndicator3) ====================
+    
+    def update_linux_menu(self):
+        """Actualiza menú GTK (Linux)"""
+        for item in self.menu.get_children():
+            self.menu.remove(item)
+        
+        count = len(self.processes)
+        title = Gtk.MenuItem(label=f"{count} proceso{'s' if count != 1 else ''} activo{'s' if count != 1 else ''}")
+        title.set_sensitive(False)
+        self.menu.append(title)
+        self.menu.append(Gtk.SeparatorMenuItem())
+        
+        if self.processes:
+            for proc in sorted(self.processes, key=lambda x: x['port']):
+                label = f"Puerto {proc['port']}: {proc['name']} (PID: {proc['pid']})"
+                item = Gtk.MenuItem(label=label)
+                item.connect('activate', lambda w, p=proc['port']: self.on_kill_port_linux(w, p))
+                self.menu.append(item)
+            
+            self.menu.append(Gtk.SeparatorMenuItem())
+            kill_all = Gtk.MenuItem(label="Eliminar Todos")
+            kill_all.connect('activate', self.on_kill_all_linux)
+            self.menu.append(kill_all)
+        else:
+            no_proc = Gtk.MenuItem(label="No hay procesos activos")
+            no_proc.set_sensitive(False)
+            self.menu.append(no_proc)
+        
+        self.menu.append(Gtk.SeparatorMenuItem())
+        list_item = Gtk.MenuItem(label="Listar en Consola")
+        list_item.connect('activate', self.on_list_processes_linux)
+        self.menu.append(list_item)
+        
+        range_item = Gtk.MenuItem(label=f"Rango: {self.start_port}-{self.end_port}")
+        range_item.set_sensitive(False)
+        self.menu.append(range_item)
+        
+        self.menu.append(Gtk.SeparatorMenuItem())
+        quit_item = Gtk.MenuItem(label="Salir")
+        quit_item.connect('activate', self.on_quit_linux)
+        self.menu.append(quit_item)
+        
+        self.menu.show_all()
+    
+    def on_kill_port_linux(self, widget, port):
+        count = self.destroyer.kill_port(port)
+        if count > 0:
+            print(f"\n[OK] Proceso eliminado en puerto {port}")
+        GLib.idle_add(self._update_ui_linux)
+    
+    def on_kill_all_linux(self, widget):
+        count = self.destroyer.kill_all()
+        print(f"\n[OK] Se eliminaron {count} proceso(s)")
+        GLib.idle_add(self._update_ui_linux)
+    
+    def on_list_processes_linux(self, widget):
         print("\n" + "="*80)
         self.destroyer.list_processes()
         print("="*80 + "\n")
     
-    def on_kill_all(self, icon, item):
-        """Mata todos los procesos"""
-        self._bring_to_front()
-        count = self.destroyer.kill_all()
-        print(f"\n[OK] Se eliminaron {count} proceso(s)\n")
-        # Forzar actualización inmediata
-        self._force_update()
-    
-    def on_kill_port(self, port):
-        """Crea una función para matar un proceso en un puerto específico"""
-        def kill(icon, item):
-            self._bring_to_front()
-            count = self.destroyer.kill_port(port)
-            if count > 0:
-                print(f"\n[OK] Proceso eliminado en puerto {port}\n")
-            # Forzar actualización inmediata
-            self._force_update()
-        return kill
-    
-    def _force_update(self):
-        """Fuerza una actualización inmediata de los procesos"""
-        try:
-            self.processes = self.destroyer.get_processes_on_ports()
-            self.processes_dict = {(p['port'], p['pid']): p for p in self.processes}
-            if self.icon:
-                has_processes = len(self.processes) > 0
-                self.icon.icon = self.create_icon_image(has_processes)
-                count = len(self.processes)
-                self.icon.title = f"PortDestroyer - {count} proceso{'s' if count != 1 else ''}"
-                self.icon.menu = pystray.Menu(self.create_menu)
-        except Exception as e:
-            print(f"[ERROR] Actualizando: {e}")
-    
-    def on_quit(self, icon, item):
-        """Cierra la aplicación"""
-        print("\n[INFO] Cerrando PortDestroyer...\n")
+    def on_quit_linux(self, widget):
+        print("\n[INFO] Cerrando PortDestroyer...")
         self.stop_event.set()
-        icon.stop()
+        Gtk.main_quit()
     
-    def create_menu(self):
-        """Crea el menú dinámico"""
+    def _update_ui_linux(self):
+        """Actualiza UI de Linux"""
+        has_processes = len(self.processes) > 0
+        icon_path = self.icon_path_red if has_processes else self.icon_path_green
+        self.indicator.set_icon_full(icon_path, "PortDestroyer")
+        self.update_linux_menu()
+        print(f"[DEBUG] UI actualizada: {len(self.processes)} procesos")
+        return False
+    
+    # ==================== MACOS (pystray) ====================
+    
+    def create_macos_menu(self):
+        """Crea menú pystray (macOS)"""
         try:
             menu_items = []
-            
-            # Título con información
-            processes_count = len(self.processes)
-            status = f'{processes_count} proceso{"s" if processes_count != 1 else ""} activo{"s" if processes_count != 1 else ""}'
+            count = len(self.processes)
+            status = f'{count} proceso{"s" if count != 1 else ""} activo{"s" if count != 1 else ""}'
             menu_items.append(item(status, lambda: None, enabled=False))
             menu_items.append(item('-', lambda: None))
             
-            # Listar procesos individuales
             if self.processes:
                 for proc in sorted(self.processes, key=lambda x: x['port']):
                     label = f"Puerto {proc['port']}: {proc['name']} (PID: {proc['pid']})"
-                    menu_items.append(item(label, self.on_kill_port(proc['port'])))
-                
+                    menu_items.append(item(label, self.on_kill_port_macos(proc['port'])))
                 menu_items.append(item('-', lambda: None))
-                menu_items.append(item('Eliminar Todos', self.on_kill_all))
+                menu_items.append(item('Eliminar Todos', self.on_kill_all_macos))
             else:
                 menu_items.append(item('No hay procesos activos', lambda: None, enabled=False))
             
             menu_items.append(item('-', lambda: None))
-            
-            # Opciones generales
-            menu_items.append(item('Listar en Consola', self.on_list_processes))
+            menu_items.append(item('Listar en Consola', self.on_list_processes_macos))
             menu_items.append(item(f'Rango: {self.start_port}-{self.end_port}', lambda: None, enabled=False))
             menu_items.append(item('-', lambda: None))
-            menu_items.append(item('Salir', self.on_quit))
+            menu_items.append(item('Salir', self.on_quit_macos))
             
             return tuple(menu_items)
         except Exception as e:
             print(f"[ERROR] Creando menú: {e}")
-            import traceback
-            traceback.print_exc()
-            # Retornar menú mínimo en caso de error
-            return (item('Error en menú', lambda: None, enabled=False),
-                    item('Salir', self.on_quit))
+            return (item('Error', lambda: None, enabled=False), item('Salir', self.on_quit_macos))
     
-    def _bring_to_front(self):
-        """Trae la aplicación al frente en macOS"""
-        if platform.system() == "Darwin":
-            try:
-                import AppKit
-                # Activar la aplicación para que aparezca al frente
-                app = AppKit.NSApplication.sharedApplication()
-                app.activateIgnoringOtherApps_(True)
-            except Exception as e:
-                print(f"[DEBUG] No se pudo traer al frente: {e}")
+    def on_kill_port_macos(self, port):
+        def kill(icon, item):
+            count = self.destroyer.kill_port(port)
+            if count > 0:
+                print(f"\n[OK] Proceso eliminado en puerto {port}")
+            self._update_ui_macos()
+        return kill
     
-    def setup(self, icon):
-        """Configuración inicial del ícono"""
-        icon.visible = True
-        
-        # Configurar para que siempre aparezca al frente en macOS
-        if platform.system() == "Darwin":
+    def on_kill_all_macos(self, icon, item):
+        count = self.destroyer.kill_all()
+        print(f"\n[OK] Se eliminaron {count} proceso(s)")
+        self._update_ui_macos()
+    
+    def on_list_processes_macos(self, icon, item):
+        print("\n" + "="*80)
+        self.destroyer.list_processes()
+        print("="*80 + "\n")
+    
+    def on_quit_macos(self, icon, item):
+        print("\n[INFO] Cerrando PortDestroyer...")
+        self.stop_event.set()
+        self.icon.stop()
+    
+    def _update_ui_macos(self):
+        """Actualiza UI de macOS"""
+        self.processes = self.destroyer.get_processes_on_ports()
+        self.processes_dict = {(p['port'], p['pid']): p for p in self.processes}
+        if self.icon:
+            has_processes = len(self.processes) > 0
+            self.icon.icon = self.create_macos_icon(has_processes)
+            count = len(self.processes)
+            self.icon.title = f"PortDestroyer - {count} proceso{'s' if count != 1 else ''}"
+            self.icon.menu = pystray.Menu(self.create_macos_menu)
+    
+    # ==================== COMÚN ====================
+    
+    def update_processes(self):
+        """Thread de actualización (común para ambos OS)"""
+        while not self.stop_event.is_set():
             try:
-                import AppKit
-                # Configurar nivel de activación alto
-                app = AppKit.NSApplication.sharedApplication()
-                app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+                new_processes = self.destroyer.get_processes_on_ports()
+                new_dict = {(p['port'], p['pid']): p for p in new_processes}
+                
+                if new_dict != self.processes_dict:
+                    self.processes = new_processes
+                    self.processes_dict = new_dict
+                    print(f"[DEBUG] Procesos actualizados: {len(self.processes)}")
+                    
+                    # Actualizar UI según el OS
+                    if IS_LINUX:
+                        GLib.idle_add(self._update_ui_linux)
+                    else:
+                        self._update_ui_macos()
+                        
             except Exception as e:
-                print(f"[DEBUG] No se pudo configurar prioridad: {e}")
-        
-        print(f"""
-╔══════════════════════════════════════════════════════════╗
-║              PortDestroyer - System Tray                 ║
-║                                                           ║
-║  Rango de puertos: {self.start_port}-{self.end_port}                             ║
-║  Sistema: {platform.system()}                                      ║
-║  Actualización: Tiempo real (1.5s)                       ║
-║                                                           ║
-║  Indicador en barra superior:                            ║
-║  • Verde = Sin procesos                                  ║
-║  • Rojo = Procesos activos                              ║
-╚══════════════════════════════════════════════════════════╝
-        """)
+                print(f"[ERROR] Actualizando: {e}")
+            
+            time.sleep(self.update_interval)
     
     def run(self):
-        """Inicia la aplicación de bandeja"""
-        if not HAS_PYSTRAY:
-            print("\n[ERROR] pystray no está instalado")
-            print("Instálalo con: pip3 install pystray pillow\n")
-            return
-        
-        # Configurar macOS para que la app siempre esté al frente
-        if platform.system() == "Darwin":
-            try:
-                import AppKit
-                from PyObjCTools import AppHelper
-                
-                # Obtener la aplicación NSApplication
-                app = AppKit.NSApplication.sharedApplication()
-                
-                # Configurar como agente con política de presentación que permite estar siempre visible
-                app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
-                
-                # Activar la aplicación ignorando otras apps
-                app.activateIgnoringOtherApps_(True)
-                
-            except Exception as e:
-                print(f"[DEBUG] Configuración de macOS: {e}")
-        
-        # Cargar procesos iniciales antes de crear el icono
+        """Ejecuta la aplicación según el OS"""
+        # Cargar procesos iniciales
         print("[INFO] Cargando procesos iniciales...")
         self.processes = self.destroyer.get_processes_on_ports()
         self.processes_dict = {(p['port'], p['pid']): p for p in self.processes}
         print(f"[INFO] {len(self.processes)} proceso(s) encontrado(s)")
         
-        # Crear ícono
-        image = self.create_icon_image(len(self.processes) > 0)
-        self.icon = pystray.Icon(
-            "PortDestroyer",
-            image,
-            f"PortDestroyer - {len(self.processes)} proceso(s)",
-            menu=pystray.Menu(self.create_menu)
-        )
+        # Mostrar banner
+        print(f"""
+╔══════════════════════════════════════════════════════════╗
+║              PortDestroyer - System Tray                 ║
+║  OS: {platform.system():<52} ║
+║  Rango: {self.start_port}-{self.end_port:<47} ║
+║  Actualización: Tiempo real (1.5s)                       ║
+╚══════════════════════════════════════════════════════════╝
+        """)
         
         # Iniciar thread de actualización
         update_thread = Thread(target=self.update_processes, daemon=True)
         update_thread.start()
         
-        # Configurar y ejecutar
-        try:
-            self.icon.run(setup=self.setup)
-        except Exception as e:
-            if "SystemExit" not in str(type(e).__name__):
-                raise
+        if IS_LINUX:
+            # Actualizar menú inicial
+            self.update_linux_menu()
+            self._update_ui_linux()
+            # Ejecutar GTK main loop
+            try:
+                Gtk.main()
+            except KeyboardInterrupt:
+                print("\n[INFO] Cerrando...")
+                self.stop_event.set()
+        else:
+            # macOS
+            try:
+                app = AppKit.NSApplication.sharedApplication()
+                app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+                app.activateIgnoringOtherApps_(True)
+            except:
+                pass
+            
+            # Crear icono pystray
+            image = self.create_macos_icon(len(self.processes) > 0)
+            self.icon = pystray.Icon(
+                "PortDestroyer",
+                image,
+                f"PortDestroyer - {len(self.processes)} proceso(s)",
+                menu=pystray.Menu(self.create_macos_menu)
+            )
+            
+            try:
+                self.icon.run()
+            except SystemExit:
+                pass
 
 
 def main():
     """Función principal"""
     import argparse
-    import signal
     
-    parser = argparse.ArgumentParser(
-        description='PortDestroyer System Tray - Interfaz de bandeja del sistema'
-    )
-    
-    parser.add_argument('--start', type=int, default=3000,
-                       help='Puerto inicial del rango (default: 3000)')
-    parser.add_argument('--end', type=int, default=9000,
-                       help='Puerto final del rango (default: 9000)')
-    parser.add_argument('--debug', action='store_true',
-                       help='Modo debug con información adicional')
-    
+    parser = argparse.ArgumentParser(description='PortDestroyer System Tray')
+    parser.add_argument('--start', type=int, default=3000, help='Puerto inicial (default: 3000)')
+    parser.add_argument('--end', type=int, default=9000, help='Puerto final (default: 9000)')
     args = parser.parse_args()
     
-    # Validar rango
     if args.start >= args.end:
-        print("[ERROR] El puerto inicial debe ser menor que el puerto final")
+        print("[ERROR] El puerto inicial debe ser menor que el final")
         sys.exit(1)
     
-    # Crear aplicación
     app = PortDestroyerTray(start_port=args.start, end_port=args.end)
     
-    # Manejar señales de cierre correctamente
+    # Manejar señales
     def signal_handler(sig, frame):
-        print("\n[INFO] Cerrando PortDestroyer...")
+        print("\n[INFO] Cerrando...")
         app.stop_event.set()
-        if app.icon:
+        if IS_LINUX:
+            Gtk.main_quit()
+        elif app.icon:
             try:
                 app.icon.stop()
             except:
-                pass  # Ignorar errores de Xlib al cerrar
-        # No llamar sys.exit() aquí para evitar error de Xlib
+                pass
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -447,16 +450,9 @@ def main():
     try:
         app.run()
     except KeyboardInterrupt:
-        print("\n[INFO] Cerrando PortDestroyer...")
         app.stop_event.set()
     except SystemExit:
-        # Salida normal, no mostrar error
         pass
-    except Exception as e:
-        print(f"\n[ERROR] Error fatal: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
 
 
 if __name__ == '__main__':
