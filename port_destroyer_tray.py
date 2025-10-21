@@ -77,9 +77,14 @@ class PortDestroyerTray:
                 self.base_icon = None
                 return
             
-            # Convertir SVG a PNG en memoria con tamaño más grande
-            png_data = cairosvg.svg2png(url=svg_path, output_width=128, output_height=128)
+            # En Linux, usar tamaño más pequeño para mejor calidad
+            icon_size = 64 if platform.system() == "Linux" else 128
+            
+            # Convertir SVG a PNG en memoria
+            png_data = cairosvg.svg2png(url=svg_path, output_width=icon_size, output_height=icon_size)
             self.base_icon = Image.open(BytesIO(png_data))
+            
+            print(f"[INFO] Icono cargado correctamente ({icon_size}x{icon_size})")
             
         except Exception as e:
             print(f"[ERROR] No se pudo cargar el icono SVG: {e}")
@@ -183,17 +188,24 @@ class PortDestroyerTray:
                     self.processes = new_processes
                     self.processes_dict = new_dict
                     
+                    print(f"[DEBUG] Procesos actualizados: {len(self.processes)}")
+                    
                     # Actualizar ícono y menú
                     if self.icon:
-                        has_processes = len(self.processes) > 0
-                        self.icon.icon = self.create_icon_image(has_processes)
-                        count = len(self.processes)
-                        self.icon.title = f"PortDestroyer - {count} proceso{'s' if count != 1 else ''}"
-                        # Actualizar menú dinámicamente
-                        self.icon.menu = pystray.Menu(self.create_menu)
+                        try:
+                            has_processes = len(self.processes) > 0
+                            self.icon.icon = self.create_icon_image(has_processes)
+                            count = len(self.processes)
+                            self.icon.title = f"PortDestroyer - {count} proceso{'s' if count != 1 else ''}"
+                            # Actualizar menú dinámicamente
+                            self.icon.menu = pystray.Menu(self.create_menu)
+                        except Exception as e:
+                            print(f"[ERROR] Actualizando UI: {e}")
                     
             except Exception as e:
                 print(f"[ERROR] Actualizando procesos: {e}")
+                import traceback
+                traceback.print_exc()
             
             # Esperar antes de la próxima actualización
             self.stop_event.wait(self.update_interval)
@@ -246,34 +258,42 @@ class PortDestroyerTray:
     
     def create_menu(self):
         """Crea el menú dinámico"""
-        menu_items = []
-        
-        # Título con información
-        processes_count = len(self.processes)
-        status = f'{processes_count} proceso{"s" if processes_count != 1 else ""} activo{"s" if processes_count != 1 else ""}'
-        menu_items.append(item(status, lambda: None, enabled=False))
-        menu_items.append(item('-', lambda: None))
-        
-        # Listar procesos individuales
-        if self.processes:
-            for proc in sorted(self.processes, key=lambda x: x['port']):
-                label = f"Puerto {proc['port']}: {proc['name']} (PID: {proc['pid']})"
-                menu_items.append(item(label, self.on_kill_port(proc['port'])))
+        try:
+            menu_items = []
+            
+            # Título con información
+            processes_count = len(self.processes)
+            status = f'{processes_count} proceso{"s" if processes_count != 1 else ""} activo{"s" if processes_count != 1 else ""}'
+            menu_items.append(item(status, lambda: None, enabled=False))
+            menu_items.append(item('-', lambda: None))
+            
+            # Listar procesos individuales
+            if self.processes:
+                for proc in sorted(self.processes, key=lambda x: x['port']):
+                    label = f"Puerto {proc['port']}: {proc['name']} (PID: {proc['pid']})"
+                    menu_items.append(item(label, self.on_kill_port(proc['port'])))
+                
+                menu_items.append(item('-', lambda: None))
+                menu_items.append(item('Eliminar Todos', self.on_kill_all))
+            else:
+                menu_items.append(item('No hay procesos activos', lambda: None, enabled=False))
             
             menu_items.append(item('-', lambda: None))
-            menu_items.append(item('Eliminar Todos', self.on_kill_all))
-        else:
-            menu_items.append(item('No hay procesos activos', lambda: None, enabled=False))
-        
-        menu_items.append(item('-', lambda: None))
-        
-        # Opciones generales
-        menu_items.append(item('Listar en Consola', self.on_list_processes))
-        menu_items.append(item(f'Rango: {self.start_port}-{self.end_port}', lambda: None, enabled=False))
-        menu_items.append(item('-', lambda: None))
-        menu_items.append(item('Salir', self.on_quit))
-        
-        return tuple(menu_items)
+            
+            # Opciones generales
+            menu_items.append(item('Listar en Consola', self.on_list_processes))
+            menu_items.append(item(f'Rango: {self.start_port}-{self.end_port}', lambda: None, enabled=False))
+            menu_items.append(item('-', lambda: None))
+            menu_items.append(item('Salir', self.on_quit))
+            
+            return tuple(menu_items)
+        except Exception as e:
+            print(f"[ERROR] Creando menú: {e}")
+            import traceback
+            traceback.print_exc()
+            # Retornar menú mínimo en caso de error
+            return (item('Error en menú', lambda: None, enabled=False),
+                    item('Salir', self.on_quit))
     
     def _bring_to_front(self):
         """Trae la aplicación al frente en macOS"""
@@ -359,6 +379,7 @@ class PortDestroyerTray:
 def main():
     """Función principal"""
     import argparse
+    import signal
     
     parser = argparse.ArgumentParser(
         description='PortDestroyer System Tray - Interfaz de bandeja del sistema'
@@ -368,6 +389,8 @@ def main():
                        help='Puerto inicial del rango (default: 3000)')
     parser.add_argument('--end', type=int, default=9000,
                        help='Puerto final del rango (default: 9000)')
+    parser.add_argument('--debug', action='store_true',
+                       help='Modo debug con información adicional')
     
     args = parser.parse_args()
     
@@ -376,14 +399,31 @@ def main():
         print("[ERROR] El puerto inicial debe ser menor que el puerto final")
         sys.exit(1)
     
-    # Crear y ejecutar aplicación
+    # Crear aplicación
     app = PortDestroyerTray(start_port=args.start, end_port=args.end)
+    
+    # Manejar señales de cierre correctamente
+    def signal_handler(sig, frame):
+        print("\n[INFO] Cerrando PortDestroyer...")
+        app.stop_event.set()
+        if app.icon:
+            app.icon.stop()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
     try:
         app.run()
     except KeyboardInterrupt:
-        print("\n\n[INFO] Cerrando PortDestroyer...\n")
+        print("\n[INFO] Cerrando PortDestroyer...")
+        app.stop_event.set()
         sys.exit(0)
+    except Exception as e:
+        print(f"\n[ERROR] Error fatal: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == '__main__':
