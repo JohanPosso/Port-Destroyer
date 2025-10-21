@@ -1,0 +1,49 @@
+# Git attributes for PortDestroyer
+# Author: Jesus Posso
+
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Python files
+*.py text eol=lf
+*.pyx text eol=lf
+*.pyi text eol=lf
+
+# Shell scripts
+*.sh text eol=lf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+LICENSE text eol=lf
+
+# Config files
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+
+# SVG and images
+*.svg text eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+
+# Archives
+*.zip binary
+*.tar.gz binary
+
+# Python bytecode
+*.pyc binary
+*.pyo binary
+*.pyd binary
+
+# Linguist overrides
+*.py linguist-language=Python
+*.md linguist-documentation
+assets/* linguist-vendored
+
+
