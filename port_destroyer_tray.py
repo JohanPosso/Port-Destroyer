@@ -37,7 +37,7 @@ if IS_LINUX:
         gi.require_version('Gtk', '3.0')
         gi.require_version('AppIndicator3', '0.1')
         from gi.repository import Gtk, AppIndicator3, GLib
-        from PIL import Image
+        from PIL import Image, ImageDraw
         import cairosvg
         HAS_DEPS = True
         print("[INFO] Backend: AppIndicator3 (Linux)")
@@ -123,31 +123,32 @@ class PortDestroyerTray:
         self._load_macos_icon()
     
     def _create_linux_icons(self):
-        """Crea iconos para Linux (verde y rojo)"""
+        """Create Linux system tray icons with status badges"""
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             svg_path = os.path.join(script_dir, 'assets', 'icon.svg')
             
             if os.path.exists(svg_path):
-                # Convertir SVG a PNG (64x64 para Linux)
-                png_green = cairosvg.svg2png(url=svg_path, output_width=64, output_height=64)
-                png_red = cairosvg.svg2png(url=svg_path, output_width=64, output_height=64)
+                # Convert SVG to PNG (64x64 for Linux) - no tinting
+                png_data = cairosvg.svg2png(url=svg_path, output_width=64, output_height=64)
+                base_img = Image.open(BytesIO(png_data))
                 
-                # Aplicar tintes
-                img_green = self._tint_image(Image.open(BytesIO(png_green)).convert('RGBA'), (40, 167, 69))
-                img_red = self._tint_image(Image.open(BytesIO(png_red)).convert('RGBA'), (220, 53, 69))
+                # Create icons with status badges
+                img_green = self._add_status_badge(base_img, False)  # Green = no processes
+                img_red = self._add_status_badge(base_img, True)     # Red = with processes
                 
                 img_green.save(self.icon_path_green, 'PNG')
                 img_red.save(self.icon_path_red, 'PNG')
-                print("[INFO] Iconos creados (64x64)")
+                print("[INFO] Icons created (64x64) with status badges")
             else:
-                # Fallback: iconos simples
-                for color, path in [((40, 167, 69), self.icon_path_green), 
-                                   ((220, 53, 69), self.icon_path_red)]:
-                    img = Image.new('RGBA', (64, 64), color + (255,))
-                    img.save(path, 'PNG')
+                # Fallback: simple icons with badges
+                base_img = Image.new('RGBA', (64, 64), (100, 100, 100, 255))
+                img_green = self._add_status_badge(base_img, False)
+                img_red = self._add_status_badge(base_img, True)
+                img_green.save(self.icon_path_green, 'PNG')
+                img_red.save(self.icon_path_red, 'PNG')
         except Exception as e:
-            print(f"[ERROR] Creando iconos: {e}")
+            print(f"[ERROR] Creating icons: {e}")
     
     def _load_macos_icon(self):
         """Carga icono para macOS"""
@@ -163,38 +164,35 @@ class PortDestroyerTray:
             print(f"[ERROR] Cargando icono: {e}")
             self.base_icon = None
     
-    def _tint_image(self, image, color):
-        """Aplica tinte de color a la imagen"""
-        pixels = image.load()
-        for y in range(image.size[1]):
-            for x in range(image.size[0]):
-                r, g, b, a = pixels[x, y]
-                if a > 0:
-                    new_r = int((r * 0.3) + (color[0] * 0.7))
-                    new_g = int((g * 0.3) + (color[1] * 0.7))
-                    new_b = int((b * 0.3) + (color[2] * 0.7))
-                    pixels[x, y] = (new_r, new_g, new_b, a)
-        return image
+    def _add_status_badge(self, image, has_processes=False):
+        """Add status badge to icon"""
+        img_with_badge = image.copy()
+        draw = ImageDraw.Draw(img_with_badge)
+        
+        # Calculate badge position (top-right corner)
+        width, height = img_with_badge.size
+        badge_size = max(8, width // 8)
+        badge_x = width - badge_size - 2
+        badge_y = 2
+        
+        # Badge color based on process status
+        badge_color = (220, 53, 69) if has_processes else (40, 167, 69)
+        
+        # Draw badge circle
+        draw.ellipse([badge_x, badge_y, badge_x + badge_size, badge_y + badge_size], 
+                    fill=badge_color, outline=(255, 255, 255), width=1)
+        
+        return img_with_badge
     
     def create_macos_icon(self, has_processes=False):
-        """Crea icono para macOS con tinte dinámico"""
+        """Create macOS icon with status badge"""
         if self.base_icon:
-            icon = self.base_icon.copy()
-            color = (220, 53, 69) if has_processes else (40, 167, 69)
-            return self._tint_image(icon, color)
+            return self._add_status_badge(self.base_icon, has_processes)
         
-        # Fallback: icono simple
+        # Fallback: simple icon with badge
         width = 64
-        img = Image.new('RGBA', (width, width), (0, 0, 0, 0))
-        dc = ImageDraw.Draw(img)
-        color = (220, 53, 69) if has_processes else (40, 167, 69)
-        dc.ellipse([8, 8, 56, 56], fill=color, outline=(255, 255, 255), width=3)
-        try:
-            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
-            dc.text((18, 10), "P", fill=(255, 255, 255), font=font)
-        except:
-            pass
-        return img
+        img = Image.new('RGBA', (width, width), (100, 100, 100, 255))
+        return self._add_status_badge(img, has_processes)
     
     # ==================== LINUX (AppIndicator3) ====================
     
